@@ -1,11 +1,15 @@
-package com.liaowh.codegen;
+package com.liaowh.codegen.service.impl;
 
 import com.google.common.base.CaseFormat;
+import com.liaowh.codegen.service.CodeGeneratorService;
+import com.liaowh.codegen.service.DatabaseInfoService;
 import freemarker.template.TemplateExceptionHandler;
-import org.apache.commons.lang3.StringUtils;
 import org.mybatis.generator.api.MyBatisGenerator;
 import org.mybatis.generator.config.*;
 import org.mybatis.generator.internal.DefaultShellCallback;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.File;
 import java.io.FileWriter;
@@ -13,16 +17,10 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
+@Service
+@Transactional
+public class CodeGeneratorServiceimpl implements CodeGeneratorService {
 
-
-/**
- * 代码生成器，根据数据表名称生成对应的Model、mapper、Service、Controller简化开发。
- */
-public class CodeGenerator {
-    //JDBC
-    private static final String JDBC_URL = "jdbc:mysql://192.168.1.80:3306/smsgate?characterEncoding=utf8";
-    private static final String JDBC_USERNAME = "root";
-    private static final String JDBC_PASSWORD = "root@2019";
     private static final String JDBC_DIVER_CLASS_NAME = "com.mysql.cj.jdbc.Driver";
 
     //REFERENCE
@@ -45,40 +43,44 @@ public class CodeGenerator {
 
     private static final String MAPPER_INTERFACE_REFERENCE = BASE_PACKAGE + ".mapper";//Mapper插件基础接口的完全限定名
 
-    private static final String AUTHOR = "Liaowh";//@author
     private static final String DATE = new SimpleDateFormat("yyyy/MM/dd").format(new Date());//@date
 
+    @Autowired
+    private DatabaseInfoService databaseInfoService;
 
-    public static void main(String[] args) {
-        genCode("extranet_info");
-        //genCodeByCustomModelName("输入表名","输入自定义Model名称");
+    protected String jdbcUrl;
+    protected String jdbcUsername;
+    protected String jdbcPasswd;
+    protected String author;
+
+    @Override
+    public void init(String url,String username,String passwd,String author) {
+        this.jdbcUrl = url;
+        this.jdbcPasswd = passwd;
+        this.jdbcUsername = username;
+        this.author = author;
     }
 
     /**
      * 通过数据表名称生成代码，Model 名称通过解析数据表名称获得，下划线转大驼峰的形式。
      * 如输入表名称 "t_user_detail" 将生成 TUserDetail、TUserDetailMapper、TUserDetailService ...
-     * @param tableNames 数据表名称...
      */
-    public static void genCode(String... tableNames) {
-        for (String tableName : tableNames) {
-            genCodeByCustomModelName(tableName, null);
+
+    @Override
+    public void genCode(List<Map> tableList) {
+        for(Map<String,String> map : tableList){
+            String tableName = map.get("value");
+            genModelAndMapper(tableName);
+            genService(tableName);
+            genController(tableName);
+            genVueViewList(tableName);
+            genVueViewEdit(tableName);
+            genVueApi(tableName);
         }
     }
 
-    /**
-     * 通过数据表名称，和自定义的 Model 名称生成代码
-     * 如输入表名称 "t_user_detail" 和自定义的 Model 名称 "User" 将生成 User、UserMapper、UserService ...
-     * @param tableName 数据表名称
-     * @param modelName 自定义的 Model 名称
-     */
-    public static void genCodeByCustomModelName(String tableName, String modelName) {
-        genModelAndMapper(tableName, modelName);
-        genService(tableName, modelName);
-        genController(tableName, modelName);
-    }
 
-
-    public static void genModelAndMapper(String tableName, String modelName) {
+    public void genModelAndMapper(String tableName) {
         Context context = new Context(ModelType.FLAT);
         context.setId("Potato");
         context.setTargetRuntime("MyBatis3Simple");
@@ -86,9 +88,9 @@ public class CodeGenerator {
         context.addProperty(PropertyRegistry.CONTEXT_ENDING_DELIMITER, "`");
 
         JDBCConnectionConfiguration jdbcConnectionConfiguration = new JDBCConnectionConfiguration();
-        jdbcConnectionConfiguration.setConnectionURL(JDBC_URL);
-        jdbcConnectionConfiguration.setUserId(JDBC_USERNAME);
-        jdbcConnectionConfiguration.setPassword(JDBC_PASSWORD);
+        jdbcConnectionConfiguration.setConnectionURL(jdbcUrl);
+        jdbcConnectionConfiguration.setUserId(jdbcUsername);
+        jdbcConnectionConfiguration.setPassword(jdbcPasswd);
         jdbcConnectionConfiguration.setDriverClass(JDBC_DIVER_CLASS_NAME);
         context.setJdbcConnectionConfiguration(jdbcConnectionConfiguration);
 
@@ -115,7 +117,6 @@ public class CodeGenerator {
 
         TableConfiguration tableConfiguration = new TableConfiguration(context);
         tableConfiguration.setTableName(tableName);
-        if (StringUtils.isNotEmpty(modelName))tableConfiguration.setDomainObjectName(modelName);
         tableConfiguration.setGeneratedKey(new GeneratedKey("id", "Mysql", true, null));
         context.addTableConfiguration(tableConfiguration);
 
@@ -138,20 +139,19 @@ public class CodeGenerator {
         if (generator.getGeneratedJavaFiles().isEmpty() || generator.getGeneratedXmlFiles().isEmpty()) {
             throw new RuntimeException("生成Model和Mapper失败：" + warnings);
         }
-        if (StringUtils.isEmpty(modelName)) modelName = tableNameConvertUpperCamel(tableName);
-        System.out.println(modelName + ".java 生成成功");
-        System.out.println(modelName + "mapper.java 生成成功");
-        System.out.println(modelName + "mapper.xml 生成成功");
+        System.out.println(tableName + ".java 生成成功");
+        System.out.println(tableName + "mapper.java 生成成功");
+        System.out.println(tableName + "mapper.xml 生成成功");
     }
 
-    public static void genService(String tableName, String modelName) {
+    public void genService(String tableName) {
         try {
             freemarker.template.Configuration cfg = getConfiguration();
 
             Map<String, Object> data = new HashMap<>();
             data.put("date", DATE);
-            data.put("author", AUTHOR);
-            String modelNameUpperCamel = StringUtils.isEmpty(modelName) ? tableNameConvertUpperCamel(tableName) : modelName;
+            data.put("author", author);
+            String modelNameUpperCamel = tableNameConvertUpperCamel(tableName);
             data.put("modelNameUpperCamel", modelNameUpperCamel);
             data.put("modelNameLowerCamel", tableNameConvertLowerCamel(tableName));
 
@@ -181,14 +181,14 @@ public class CodeGenerator {
         }
     }
 
-    public static void genController(String tableName, String modelName) {
+    public void genController(String tableName) {
         try {
             freemarker.template.Configuration cfg = getConfiguration();
 
             Map<String, Object> data = new HashMap<>();
             data.put("date", DATE);
-            data.put("author", AUTHOR);
-            String modelNameUpperCamel = StringUtils.isEmpty(modelName) ? tableNameConvertUpperCamel(tableName) : modelName;
+            data.put("author", author);
+            String modelNameUpperCamel = tableNameConvertUpperCamel(tableName);
             data.put("baseRequestMapping", modelNameConvertMappingPath(modelNameUpperCamel));
             data.put("modelNameUpperCamel", modelNameUpperCamel);
             data.put("modelNameLowerCamel", CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_CAMEL, modelNameUpperCamel));
@@ -210,6 +210,81 @@ public class CodeGenerator {
             throw new RuntimeException("生成Controller失败", e);
         }
 
+    }
+
+    private void genVueViewList(String tableName) {
+        List<Map> tableColumnList = databaseInfoService.listTableColumn(tableName);
+        try {
+            freemarker.template.Configuration cfg = getConfiguration();
+            Map<String, Object> data = new HashMap<>();
+            data.put("date", DATE);
+            data.put("author", author);
+            String modelNameUpperCamel = tableNameConvertUpperCamel(tableName);
+            String modelNameLowerCamel = CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_CAMEL, modelNameUpperCamel);
+            data.put("modelNameUpperCamel", modelNameUpperCamel);
+            data.put("modelNameLowerCamel", modelNameLowerCamel);
+            data.put("tableColumnList",tableColumnList);
+            data.put("searchItemList",tableColumnList);
+            data.put("editPath",tableNameConvertVuePath(tableName));
+            File file = new File(System.getProperty("user.dir") + "/webapp/src/modules/"
+                    + tableNameConvertUpperCamel(tableName) + "/views/" + modelNameLowerCamel + "List.vue");
+            if (!file.getParentFile().exists()) {
+                file.getParentFile().mkdirs();
+            }
+            //cfg.getTemplate("controller-restful.ftl").process(data, new FileWriter(file));
+            cfg.getTemplate("vueViewList.ftl").process(data, new FileWriter(file));
+            System.out.println(modelNameUpperCamel + ".vue 生成成功");
+        } catch (Exception e) {
+            throw new RuntimeException("vueViewList", e);
+        }
+    }
+    private void genVueViewEdit(String tableName) {
+        List<Map> tableColumnList = databaseInfoService.listTableColumn(tableName);
+        try {
+            freemarker.template.Configuration cfg = getConfiguration();
+            Map<String, Object> data = new HashMap<>();
+            data.put("date", DATE);
+            data.put("author", author);
+            String modelNameUpperCamel = tableNameConvertUpperCamel(tableName);
+            String modelNameLowerCamel = CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_CAMEL, modelNameUpperCamel);
+            data.put("modelNameUpperCamel", modelNameUpperCamel);
+            data.put("modelNameLowerCamel", modelNameLowerCamel);
+            data.put("tableColumnList",tableColumnList);
+            File file = new File(System.getProperty("user.dir") + "/webapp/src/modules/"
+                    + tableNameConvertUpperCamel(tableName) + "/views/" + modelNameLowerCamel + "Edit.vue");
+            if (!file.getParentFile().exists()) {
+                file.getParentFile().mkdirs();
+            }
+            //cfg.getTemplate("controller-restful.ftl").process(data, new FileWriter(file));
+            cfg.getTemplate("vueViewEdit.ftl").process(data, new FileWriter(file));
+            System.out.println(modelNameUpperCamel + ".vue 生成成功");
+        } catch (Exception e) {
+            throw new RuntimeException("vueViewEdit", e);
+        }
+    }
+    private void genVueApi(String tableName) {
+        try {
+            freemarker.template.Configuration cfg = getConfiguration();
+            Map<String, Object> data = new HashMap<>();
+            data.put("date", DATE);
+            data.put("author", author);
+            String modelNameUpperCamel = tableNameConvertUpperCamel(tableName);
+            String modelNameLowerCamel = CaseFormat.UPPER_CAMEL.to(CaseFormat.LOWER_CAMEL, modelNameUpperCamel);
+            data.put("modelNameUpperCamel", modelNameUpperCamel);
+            data.put("modelNameLowerCamel", modelNameLowerCamel);
+            data.put("baseRequestMapping", modelNameConvertMappingPath(modelNameUpperCamel));
+            File file = new File(System.getProperty("user.dir")  + "/webapp/src/modules/"
+                    + tableNameConvertUpperCamel(tableName) + "/api/" + modelNameLowerCamel + ".js");
+            if (!file.getParentFile().exists()) {
+                file.getParentFile().mkdirs();
+            }
+            //cfg.getTemplate("controller-restful.ftl").process(data, new FileWriter(file));
+            cfg.getTemplate("vueApi.ftl").process(data, new FileWriter(file));
+
+            System.out.println(modelNameUpperCamel + ".js 生成成功");
+        } catch (Exception e) {
+            throw new RuntimeException("vueApi", e);
+        }
     }
 
 
@@ -244,4 +319,8 @@ public class CodeGenerator {
         return String.format("/%s/", packageName.contains(".") ? packageName.replaceAll("\\.", "/") : packageName);
     }
 
+    private static String tableNameConvertVuePath(String tableName){
+        tableName = tableName.toLowerCase();//兼容使用大写的表名
+        return (tableName.contains("_") ? tableName.replaceAll("_", "-") : tableName);
+    }
 }
